@@ -3,7 +3,9 @@ name: Render PowerLaw PNG
 on:
   push:
     branches:
-      - hauptsächlich
+      - main
+  schedule:
+    - cron: "10 3 * * *"   # täglich 03:10 UTC
   workflow_dispatch:
 
 permissions:
