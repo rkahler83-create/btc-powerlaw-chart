@@ -28,7 +28,7 @@ jobs:
       - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
-          pip install requests matplotlib yfinance pandas
+          pip install matplotlib yfinance pandas numpy
 
       - name: Render chart
         run: |
