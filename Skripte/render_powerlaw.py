@@ -33,7 +33,6 @@ RESIST_MULT = 4.0
 END_DATE = dt.date(2040, 12, 31)
 Y_MAX = 10_000_000
 
-# sorgt dafür, dass der Kurs ca. 3/4 der Breite einnimmt
 LEFT_PAD_FACTOR = 0.55
 
 
@@ -114,7 +113,11 @@ def main():
 
     start_year = first_date.year
     years = list(range(start_year, END_DATE.year + 1))
-    year_tick_vals = [days_since_genesis(dt.date(y, 1, 1)) for y in years if days_since_genesis(dt.date(y, 1, 1)) >= x_min]
+    year_tick_vals = [
+        days_since_genesis(dt.date(y, 1, 1))
+        for y in years
+        if days_since_genesis(dt.date(y, 1, 1)) >= x_min
+    ]
 
     ax.set_xticks(year_tick_vals)
     ax.set_xticklabels(
@@ -142,9 +145,18 @@ def main():
         fontsize=10,
         borderpad=0.8
     )
-
     for t in leg.get_texts():
         t.set_color(TEXT)
+
+    # Quelle links unten
+    plt.figtext(
+        0.015,
+        0.015,
+        "Quelle Kursdaten: Yahoo Finance (Ticker BTC-USD)",
+        ha="left",
+        fontsize=8,
+        color="#aaaaaa"
+    )
 
     plt.tight_layout()
     plt.savefig(OUTFILE)
