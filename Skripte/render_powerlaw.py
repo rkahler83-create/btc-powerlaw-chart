@@ -3,125 +3,135 @@ import numpy as np
 import pandas as pd
 import yfinance as yf
 import matplotlib.pyplot as plt
-import matplotlib.dates as mdates
 from matplotlib.ticker import FuncFormatter, LogLocator
 
 OUTFILE = "docs/powerlaw.png"
 
-X_START = dt.date(2011, 1, 1)
-X_END   = dt.date(2040, 12, 31)
+GENESIS = dt.date(2009, 1, 3)
+START_DATE = dt.date(2011, 1, 1)
+END_DATE = dt.date(2040, 12, 31)
 
 TICKER = "BTC-USD"
+
+COLOR_PRICE = "#F7931A"
+COLOR_REG   = "#9BD36A"
+COLOR_SUP   = "#E04B3F"
+COLOR_RES   = "#8C4BD6"
 
 Y_MIN = 1
 Y_MAX = 10_000_000
 
-SUPPORT_FACTOR    = 0.20
-RESISTANCE_FACTOR = 5.00
+def days_since_genesis(d):
+    return max(1, (d - GENESIS).days)
 
-COL_PRICE = "#F7931A"
-COL_REG   = "#A6CF6C"
-COL_SUP   = "#D95C4A"
-COL_RES   = "#8E55FF"
+def fmt_plain(x, pos):
+    if x >= 1:
+        return f"{int(x):,}"
+    return ""
 
-BG = "#0B0C0F"
-
-def fmt_usd(x, pos):
-    if x <= 0:
-        return ""
-    return f"{int(x):,}"
-
-def fetch_data():
+def load_data():
     df = yf.download(
         TICKER,
-        start="2010-01-01",
+        start=GENESIS.isoformat(),
         progress=False
     )
-    s = df["Close"].dropna().astype(float)
-    s.index = pd.to_datetime(s.index).tz_localize(None)
-    s = s[s.index.date >= X_START]
-    s = s[s > 0]
-    return s
-
-def fit_regression(price_series):
-    dates = price_series.index
-    t = np.array([(d.date() - X_START).days for d in dates], dtype=float)
-    log_y = np.log(price_series.values)
-    m, c = np.polyfit(t, log_y, 1)
-    return m, c
+    close = df["Close"].dropna().astype(float)
+    close.index = close.index.tz_localize(None)
+    close = close[close > 0]
+    return close
 
 def main():
-    prices = fetch_data()
-    m, c = fit_regression(prices)
+    close_all = load_data()
+    close = close_all[close_all.index.date >= START_DATE]
 
-    fig = plt.figure(figsize=(16, 9), dpi=160, facecolor=BG)
-    ax = fig.add_subplot(111, facecolor=BG)
+    x_days = np.array([days_since_genesis(d.date()) for d in close.index])
+    y_price = close.values
 
+    lx = np.log10(x_days)
+    ly = np.log10(y_price)
+
+    b, a = np.polyfit(lx, ly, 1)
+
+    resid = ly - (a + b * lx)
+    off_low = np.quantile(resid, 0.10)
+    off_high = np.quantile(resid, 0.90)
+
+    x_start = days_since_genesis(START_DATE)
+    x_end = days_since_genesis(END_DATE)
+
+    x_grid = np.logspace(np.log10(x_start), np.log10(x_end), 1500)
+
+    y_reg = 10 ** (a + b * np.log10(x_grid))
+    y_sup = 10 ** (a + b * np.log10(x_grid) + off_low)
+    y_res = 10 ** (a + b * np.log10(x_grid) + off_high)
+
+    plt.close("all")
+    fig = plt.figure(figsize=(16, 9), dpi=160)
+    ax = fig.add_subplot(111)
+
+    fig.patch.set_facecolor("#0B0C10")
+    ax.set_facecolor("#0B0C10")
+
+    ax.set_xscale("log")
     ax.set_yscale("log")
 
-    full_dates = pd.date_range(start=X_START, end=X_END, freq="D")
-    t_full = np.array([(d.date() - X_START).days for d in full_dates], dtype=float)
+    ax.plot(x_grid, y_res, color=COLOR_RES, linewidth=2.2, label="Widerstand")
+    ax.plot(x_grid, y_reg, color=COLOR_REG, linewidth=2.2, label="Regression")
+    ax.plot(x_grid, y_sup, color=COLOR_SUP, linewidth=2.2, label="Unterstützung")
+    ax.plot(x_days, y_price, color=COLOR_PRICE, linewidth=2.0, label="Preis (Tagesschluss)")
 
-    reg = np.exp(m * t_full + c)
-    sup = reg * SUPPORT_FACTOR
-    res = reg * RESISTANCE_FACTOR
-
-    ax.plot(full_dates, res, color=COL_RES, lw=1.6, label="Widerstand")
-    ax.plot(full_dates, reg, color=COL_REG, lw=1.6, label="Regression")
-    ax.plot(full_dates, sup, color=COL_SUP, lw=1.6, label="Unterstützung")
-    ax.plot(prices.index, prices.values, color=COL_PRICE, lw=1.6, label="Preis (Tagesschluss)")
-
-    ax.set_xlim(X_START, X_END)
+    ax.set_xlim(x_start, x_end)
     ax.set_ylim(Y_MIN, Y_MAX)
 
     ax.yaxis.set_major_locator(LogLocator(base=10.0))
-    ax.yaxis.set_major_formatter(FuncFormatter(fmt_usd))
+    ax.yaxis.set_major_formatter(FuncFormatter(fmt_plain))
 
-    ax.xaxis.set_major_locator(mdates.YearLocator())
-    ax.xaxis.set_major_formatter(mdates.DateFormatter('%Y'))
+    year_ticks = []
+    year_labels = []
+    for y in range(2011, 2041):
+        year_ticks.append(days_since_genesis(dt.date(y, 1, 1)))
+        year_labels.append(str(y))
 
-    ax.tick_params(axis="x", colors="white", labelsize=9, rotation=25)
-    ax.tick_params(axis="y", colors="white", labelsize=9)
+    ax.set_xticks(year_ticks)
+    ax.set_xticklabels(year_labels, rotation=30, ha="right")
 
-    ax.grid(True, which="major", alpha=0.15)
-    ax.grid(True, which="minor", alpha=0.05)
+    ax.grid(True, which="major", alpha=0.35, linewidth=1.0)
+    ax.grid(True, which="minor", alpha=0.12, linewidth=0.6)
 
-    for spine in ax.spines.values():
-        spine.set_visible(False)
+    ax.set_ylabel("USD", color="#CCCCCC")
+    ax.tick_params(axis="both", colors="#DDDDDD")
 
-    ax.set_ylabel("USD", color="white")
-
-    legend = ax.legend(
+    leg = ax.legend(
         loc="lower right",
         frameon=True,
-        facecolor=(0.1, 0.1, 0.1, 0.6),
-        edgecolor=(1, 1, 1, 0.2),
-        fontsize=9
+        facecolor="#0F0F0F",
+        edgecolor="#3A3A3A",
+        framealpha=0.9
     )
-    for text in legend.get_texts():
-        text.set_color("white")
+    for t in leg.get_texts():
+        t.set_color("#E6E6E6")
 
-    # 🔥 Quellenhinweis exakt zwischen 1.000.000 und 100.000 platzieren
-    # Y = ca. 500.000 (log-Mitte zwischen 1e6 und 1e5)
     ax.text(
-        X_START + dt.timedelta(days=120),
-        500_000,
+        days_since_genesis(dt.date(2011, 6, 1)),
+        2_000_000,
         "Quelle Kursdaten: Yahoo Finance (Ticker BTC-USD)",
         color="white",
-        fontsize=9,
+        fontsize=11,
+        va="top",
         ha="left",
-        va="center",
         bbox=dict(
-            boxstyle="square,pad=0.3",
+            boxstyle="square,pad=0.45",
             facecolor="none",
             edgecolor="white",
-            linewidth=1.0   # dünn wie andere Linien
-        )
+            linewidth=1.0
+        ),
     )
 
+    for spine in ax.spines.values():
+        spine.set_color("#22252A")
+
     plt.tight_layout()
-    fig.savefig(OUTFILE, facecolor=BG, bbox_inches="tight")
-    plt.close(fig)
+    fig.savefig(OUTFILE, facecolor=fig.get_facecolor(), bbox_inches="tight")
 
 if __name__ == "__main__":
     main()
