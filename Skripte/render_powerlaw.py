@@ -1,167 +1,116 @@
 import datetime as dt
-import numpy as np
+import math
 import matplotlib.pyplot as plt
-import matplotlib.ticker as ticker
+import matplotlib.ticker as mticker
+import numpy as np
 import yfinance as yf
 
-# ==============================
-# OUTPUT
-# ==============================
 OUTFILE = "docs/powerlaw.png"
 
-# ==============================
-# DESIGN
-# ==============================
-BG = "#0b0b0b"
-GRID_MAJOR = "#3a3a3a"
-GRID_MINOR = "#2a2a2a"
-TEXT = "#eaeaea"
-
-BTC_ORANGE = "#F7931A"
-REG_COLOR = "#6fdc3f"
-SUPPORT_COLOR = "#ff2d2d"
-RES_COLOR = "#a64dff"
-
-# ==============================
-# POWER LAW SETTINGS
-# ==============================
+START_DATE = "2011-01-01"
+END_YEAR = 2040
 GENESIS = dt.date(2009, 1, 3)
 
-SUPPORT_MULT = 0.25
-RESIST_MULT = 4.0
+# Power Law Parameter (log-log)
+B = 5.68
+A = 10 ** (-16.493)
 
-END_DATE = dt.date(2040, 12, 31)
-Y_MAX = 10_000_000
+SUPPORT_MULT = 0.35
+RESIST_MULT = 2.20
 
-LEFT_PAD_FACTOR = 0.55
+COL_PRICE = "#F7931A"
+COL_REG = "#9BE26D"
+COL_SUP = "#E44E3A"
+COL_RES = "#8E5BFF"
 
+BG = "#0B0D10"
 
 def days_since_genesis(d):
     return max(1, (d - GENESIS).days)
 
+def powerlaw_price(days):
+    return A * np.power(days, B)
 
-def fetch_btc_daily_close(start="2010-07-17"):
-    df = yf.download("BTC-USD", start=start, interval="1d", progress=False)
-    df = df.dropna()
-
-    close = df["Close"]
-
-    try:
-        prices = close.values.astype(float).flatten()
-    except Exception:
-        prices = np.array(list(close), dtype=float)
-
-    dates = [d.date() for d in df.index]
-    return dates, prices
-
-
-def fit_powerlaw(dates, prices):
-    x = np.array([days_since_genesis(d) for d in dates], dtype=float)
-    y = np.array(prices, dtype=float)
-
-    lx = np.log10(x)
-    ly = np.log10(y)
-
-    b, a = np.polyfit(lx, ly, 1)
-    k = 10 ** a
-    return k, b
-
-
-def generate_daily_dates(start_date, end_date):
-    n = (end_date - start_date).days
-    return [start_date + dt.timedelta(days=i) for i in range(n + 1)]
-
+def fetch_data():
+    df = yf.download(
+        "BTC-USD",
+        start=START_DATE,
+        interval="1d",
+        progress=False
+    )
+    s = df["Close"].dropna()
+    dates = s.index.date
+    prices = s.to_numpy(dtype=float)
+    x = np.array([float(days_since_genesis(d)) for d in dates])
+    return x, prices
 
 def main():
+    x_days, y_close = fetch_data()
 
-    hist_dates, hist_prices = fetch_btc_daily_close()
-    first_date = hist_dates[0]
+    x_min = float(days_since_genesis(dt.date(2011, 1, 1)))
+    x_max = float(days_since_genesis(dt.date(END_YEAR, 12, 31)))
 
-    k, b = fit_powerlaw(hist_dates, hist_prices)
+    x_line = np.logspace(math.log10(x_min), math.log10(x_max), 900)
+    y_reg = powerlaw_price(x_line)
 
-    model_dates = generate_daily_dates(first_date, END_DATE)
+    # Regression an aktuellen Kurs anpassen
+    last_x = x_days[-1]
+    last_price = y_close[-1]
+    reg_last = powerlaw_price(np.array([last_x]))[0]
+    scale = last_price / reg_last
+    y_reg = y_reg * scale
 
-    x_hist = np.array([days_since_genesis(d) for d in hist_dates], dtype=float)
-    x_model = np.array([days_since_genesis(d) for d in model_dates], dtype=float)
+    y_sup = y_reg * SUPPORT_MULT
+    y_res = y_reg * RESIST_MULT
 
-    reg = k * (x_model ** b)
-    support = reg * SUPPORT_MULT
-    resistance = reg * RESIST_MULT
-
-    plt.figure(figsize=(15.5, 7.8), dpi=220)
-    ax = plt.gca()
-
-    ax.set_facecolor(BG)
-    plt.gcf().patch.set_facecolor(BG)
+    fig = plt.figure(figsize=(16, 9), dpi=160, facecolor=BG)
+    ax = fig.add_subplot(111, facecolor=BG)
 
     ax.set_xscale("log")
     ax.set_yscale("log")
 
-    ax.yaxis.set_major_formatter(
-        ticker.FuncFormatter(lambda y, _: f"{y:,.0f}")
-    )
+    ax.plot(x_line, y_res, color=COL_RES, lw=1.6)
+    ax.plot(x_line, y_reg, color=COL_REG, lw=1.6)
+    ax.plot(x_line, y_sup, color=COL_SUP, lw=1.6)
+    ax.plot(x_days, y_close, color=COL_PRICE, lw=1.6)
 
-    ymin_auto = max(0.1, float(np.nanmin(hist_prices)) * 0.6)
-    ax.set_ylim(ymin_auto, Y_MAX)
-
-    x_min = max(1, int(days_since_genesis(first_date) * LEFT_PAD_FACTOR))
-    x_max = days_since_genesis(END_DATE)
     ax.set_xlim(x_min, x_max)
+    ax.set_ylim(100, 10_000_000)
 
-    ax.grid(True, which="major", color=GRID_MAJOR, linewidth=0.9, alpha=0.85)
-    ax.grid(True, which="minor", color=GRID_MINOR, linewidth=0.45, alpha=0.35)
+    ax.grid(True, which="major", alpha=0.15)
+    ax.grid(True, which="minor", alpha=0.07)
 
-    start_year = first_date.year
-    years = list(range(start_year, END_DATE.year + 1))
-    year_tick_vals = [
-        days_since_genesis(dt.date(y, 1, 1))
-        for y in years
-        if days_since_genesis(dt.date(y, 1, 1)) >= x_min
-    ]
-
-    ax.set_xticks(year_tick_vals)
-    ax.set_xticklabels(
-        [str(y) for y in years if days_since_genesis(dt.date(y, 1, 1)) >= x_min],
-        rotation=35,
-        ha="right",
-        color=TEXT,
-        fontsize=9
+    ax.yaxis.set_major_locator(mticker.LogLocator(base=10.0))
+    ax.yaxis.set_major_formatter(
+        mticker.FuncFormatter(lambda v, pos: f"{int(v):,}")
     )
 
-    ax.plot(x_model, resistance, color=RES_COLOR, linewidth=2.2, label="Widerstand")
-    ax.plot(x_model, reg, color=REG_COLOR, linewidth=2.2, label="Regression")
-    ax.plot(x_model, support, color=SUPPORT_COLOR, linewidth=2.2, label="Unterstützung")
-    ax.plot(x_hist, hist_prices, color=BTC_ORANGE, linewidth=2.0, label="Preis (Tagesschluss)")
+    years = list(range(2011, END_YEAR + 1))
+    xticks = [days_since_genesis(dt.date(y, 1, 1)) for y in years]
+    ax.set_xticks(xticks)
+    ax.set_xticklabels([str(y) for y in years], rotation=25)
 
-    ax.tick_params(colors=TEXT)
-    ax.set_ylabel("USD", color=TEXT)
+    ax.set_ylabel("USD")
 
-    leg = ax.legend(
-        loc="lower right",
-        frameon=True,
-        facecolor=BG,
-        edgecolor=GRID_MAJOR,
-        framealpha=1.0,
-        fontsize=10,
-        borderpad=0.8
-    )
-    for t in leg.get_texts():
-        t.set_color(TEXT)
-
-    # Quelle links unten
-    plt.figtext(
-        0.015,
-        0.015,
+    ax.text(
+        0.02, 0.93,
         "Quelle Kursdaten: Yahoo Finance (Ticker BTC-USD)",
+        transform=ax.transAxes,
         ha="left",
-        fontsize=8,
-        color="#aaaaaa"
+        va="top",
+        color="white",
+        fontsize=9,
+        bbox=dict(
+            boxstyle="square,pad=0.35",
+            facecolor="none",
+            edgecolor="white",
+            linewidth=1.0,
+        ),
     )
 
     plt.tight_layout()
-    plt.savefig(OUTFILE)
-    plt.close()
-
+    fig.savefig(OUTFILE, facecolor=BG, bbox_inches="tight")
+    plt.close(fig)
 
 if __name__ == "__main__":
     main()
