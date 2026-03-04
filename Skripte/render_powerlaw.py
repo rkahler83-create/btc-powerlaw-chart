@@ -1,111 +1,122 @@
 import datetime as dt
-import math
-import matplotlib.pyplot as plt
-import matplotlib.ticker as mticker
 import numpy as np
+import pandas as pd
 import yfinance as yf
+import matplotlib.pyplot as plt
+import matplotlib.dates as mdates
+from matplotlib.ticker import FuncFormatter, LogLocator
 
 OUTFILE = "docs/powerlaw.png"
 
-START_DATE = "2011-01-01"
-END_YEAR = 2040
-GENESIS = dt.date(2009, 1, 3)
+X_START = dt.date(2011, 1, 1)
+X_END   = dt.date(2040, 12, 31)
 
-# Power Law Parameter (log-log)
-B = 5.68
-A = 10 ** (-16.493)
+TICKER = "BTC-USD"
 
-SUPPORT_MULT = 0.35
-RESIST_MULT = 2.20
+Y_MIN = 1
+Y_MAX = 10_000_000
+
+SUPPORT_FACTOR    = 0.20
+RESISTANCE_FACTOR = 5.00
 
 COL_PRICE = "#F7931A"
-COL_REG = "#9BE26D"
-COL_SUP = "#E44E3A"
-COL_RES = "#8E5BFF"
+COL_REG   = "#A6CF6C"
+COL_SUP   = "#D95C4A"
+COL_RES   = "#8E55FF"
 
-BG = "#0B0D10"
+BG = "#0B0C0F"
 
-def days_since_genesis(d):
-    return max(1, (d - GENESIS).days)
-
-def powerlaw_price(days):
-    return A * np.power(days, B)
+def fmt_usd(x, pos):
+    if x <= 0:
+        return ""
+    return f"{int(x):,}"
 
 def fetch_data():
     df = yf.download(
-        "BTC-USD",
-        start=START_DATE,
-        interval="1d",
+        TICKER,
+        start="2010-01-01",
         progress=False
     )
-    s = df["Close"].dropna()
-    dates = s.index.date
-    prices = s.to_numpy(dtype=float)
-    x = np.array([float(days_since_genesis(d)) for d in dates])
-    return x, prices
+    s = df["Close"].dropna().astype(float)
+    s.index = pd.to_datetime(s.index).tz_localize(None)
+    s = s[s.index.date >= X_START]
+    s = s[s > 0]
+    return s
+
+def fit_regression(price_series):
+    dates = price_series.index
+    t = np.array([(d.date() - X_START).days for d in dates], dtype=float)
+    log_y = np.log(price_series.values)
+    m, c = np.polyfit(t, log_y, 1)
+    return m, c
 
 def main():
-    x_days, y_close = fetch_data()
-
-    x_min = float(days_since_genesis(dt.date(2011, 1, 1)))
-    x_max = float(days_since_genesis(dt.date(END_YEAR, 12, 31)))
-
-    x_line = np.logspace(math.log10(x_min), math.log10(x_max), 900)
-    y_reg = powerlaw_price(x_line)
-
-    # Regression an aktuellen Kurs anpassen
-    last_x = x_days[-1]
-    last_price = y_close[-1]
-    reg_last = powerlaw_price(np.array([last_x]))[0]
-    scale = last_price / reg_last
-    y_reg = y_reg * scale
-
-    y_sup = y_reg * SUPPORT_MULT
-    y_res = y_reg * RESIST_MULT
+    prices = fetch_data()
+    m, c = fit_regression(prices)
 
     fig = plt.figure(figsize=(16, 9), dpi=160, facecolor=BG)
     ax = fig.add_subplot(111, facecolor=BG)
 
-    ax.set_xscale("log")
     ax.set_yscale("log")
 
-    ax.plot(x_line, y_res, color=COL_RES, lw=1.6)
-    ax.plot(x_line, y_reg, color=COL_REG, lw=1.6)
-    ax.plot(x_line, y_sup, color=COL_SUP, lw=1.6)
-    ax.plot(x_days, y_close, color=COL_PRICE, lw=1.6)
+    full_dates = pd.date_range(start=X_START, end=X_END, freq="D")
+    t_full = np.array([(d.date() - X_START).days for d in full_dates], dtype=float)
 
-    ax.set_xlim(x_min, x_max)
-    ax.set_ylim(100, 10_000_000)
+    reg = np.exp(m * t_full + c)
+    sup = reg * SUPPORT_FACTOR
+    res = reg * RESISTANCE_FACTOR
+
+    ax.plot(full_dates, res, color=COL_RES, lw=1.6, label="Widerstand")
+    ax.plot(full_dates, reg, color=COL_REG, lw=1.6, label="Regression")
+    ax.plot(full_dates, sup, color=COL_SUP, lw=1.6, label="Unterstützung")
+    ax.plot(prices.index, prices.values, color=COL_PRICE, lw=1.6, label="Preis (Tagesschluss)")
+
+    ax.set_xlim(X_START, X_END)
+    ax.set_ylim(Y_MIN, Y_MAX)
+
+    ax.yaxis.set_major_locator(LogLocator(base=10.0))
+    ax.yaxis.set_major_formatter(FuncFormatter(fmt_usd))
+
+    ax.xaxis.set_major_locator(mdates.YearLocator())
+    ax.xaxis.set_major_formatter(mdates.DateFormatter('%Y'))
+
+    ax.tick_params(axis="x", colors="white", labelsize=9, rotation=25)
+    ax.tick_params(axis="y", colors="white", labelsize=9)
 
     ax.grid(True, which="major", alpha=0.15)
-    ax.grid(True, which="minor", alpha=0.07)
+    ax.grid(True, which="minor", alpha=0.05)
 
-    ax.yaxis.set_major_locator(mticker.LogLocator(base=10.0))
-    ax.yaxis.set_major_formatter(
-        mticker.FuncFormatter(lambda v, pos: f"{int(v):,}")
+    for spine in ax.spines.values():
+        spine.set_visible(False)
+
+    ax.set_ylabel("USD", color="white")
+
+    legend = ax.legend(
+        loc="lower right",
+        frameon=True,
+        facecolor=(0.1, 0.1, 0.1, 0.6),
+        edgecolor=(1, 1, 1, 0.2),
+        fontsize=9
     )
+    for text in legend.get_texts():
+        text.set_color("white")
 
-    years = list(range(2011, END_YEAR + 1))
-    xticks = [days_since_genesis(dt.date(y, 1, 1)) for y in years]
-    ax.set_xticks(xticks)
-    ax.set_xticklabels([str(y) for y in years], rotation=25)
-
-    ax.set_ylabel("USD")
-
+    # 🔥 Quellenhinweis exakt zwischen 1.000.000 und 100.000 platzieren
+    # Y = ca. 500.000 (log-Mitte zwischen 1e6 und 1e5)
     ax.text(
-        0.02, 0.93,
+        X_START + dt.timedelta(days=120),
+        500_000,
         "Quelle Kursdaten: Yahoo Finance (Ticker BTC-USD)",
-        transform=ax.transAxes,
-        ha="left",
-        va="top",
         color="white",
         fontsize=9,
+        ha="left",
+        va="center",
         bbox=dict(
-            boxstyle="square,pad=0.35",
+            boxstyle="square,pad=0.3",
             facecolor="none",
             edgecolor="white",
-            linewidth=1.0,
-        ),
+            linewidth=1.0   # dünn wie andere Linien
+        )
     )
 
     plt.tight_layout()
