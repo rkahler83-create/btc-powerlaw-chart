@@ -1,4 +1,5 @@
 # Skripte/render_powerlaw.py
+# Änderung: Y-Achse zeigt jetzt 1-2-5 (=> z.B. 200 und 500)
 
 import datetime as dt
 import time
@@ -68,88 +69,9 @@ def fetch_yahoo(start: dt.date, end: dt.date) -> pd.Series:
     return close
 
 
-def fetch_cryptocompare(start: dt.date, end: dt.date) -> pd.Series:
-
-    all_rows = []
-
-    to_ts = int(dt.datetime(end.year, end.month, end.day).timestamp())
-
-    while True:
-
-        url = (
-            "https://min-api.cryptocompare.com/data/v2/histoday"
-            f"?fsym=BTC&tsym=USD&limit=2000&toTs={to_ts}"
-        )
-
-        r = requests.get(url, timeout=45)
-
-        if r.status_code == 429:
-            time.sleep(2)
-            continue
-
-        r.raise_for_status()
-
-        j = r.json()
-
-        if j.get("Response") != "Success":
-            break
-
-        data = j["Data"]["Data"]
-
-        if not data:
-            break
-
-        for row in data:
-
-            d = dt.datetime.utcfromtimestamp(row["time"]).date()
-
-            if d < start or d > end:
-                continue
-
-            c = row.get("close")
-
-            if c is None or c <= 0:
-                continue
-
-            all_rows.append((pd.Timestamp(d), float(c)))
-
-        earliest = dt.datetime.utcfromtimestamp(data[0]["time"]).date()
-
-        if earliest <= start:
-            break
-
-        to_ts = int(dt.datetime(earliest.year, earliest.month, earliest.day).timestamp()) - 1
-
-    if not all_rows:
-        return pd.Series(dtype=float)
-
-    df = pd.DataFrame(all_rows, columns=["Date", "Close"]).drop_duplicates("Date")
-
-    df = df.set_index("Date").sort_index()
-
-    s = df["Close"].astype(float)
-
-    s.index = pd.to_datetime(s.index).tz_localize(None)
-
-    return s[s > 0]
-
-
 def build_close_series(start: dt.date, end: dt.date) -> pd.Series:
 
-    cc = fetch_cryptocompare(start, end)
-    yh = fetch_yahoo(start, end)
-
-    if cc.empty and yh.empty:
-        raise RuntimeError("Keine Kursdaten verfügbar")
-
-    if cc.empty:
-        s = yh.copy()
-    else:
-        s = cc.copy()
-
-        if not yh.empty:
-            s = s.combine_first(yh)
-            s.update(yh)
+    s = fetch_yahoo(start, end)
 
     full_idx = pd.date_range(start=start, end=end, freq="D")
 
@@ -158,10 +80,7 @@ def build_close_series(start: dt.date, end: dt.date) -> pd.Series:
     return s[s > 0]
 
 
-def fit_powerlaw(x: np.ndarray, y: np.ndarray):
-
-    x = np.asarray(x, dtype=float)
-    y = np.asarray(y, dtype=float)
+def fit_powerlaw(x, y):
 
     lx = np.log10(x)
     ly = np.log10(y)
@@ -172,8 +91,6 @@ def fit_powerlaw(x: np.ndarray, y: np.ndarray):
 
 
 def eval_powerlaw(a, b, x):
-
-    x = np.asarray(x, dtype=float)
 
     return 10 ** (a + b * np.log10(x))
 
@@ -256,9 +173,8 @@ def main():
     ax.set_xlim(x_min, x_max)
     ax.set_ylim(y_min, Y_MAX)
 
-    # ⭐ Änderung: komplette Log-Skala mit 1-9 Beschriftung
-
-    ax.yaxis.set_major_locator(mticker.LogLocator(base=10, subs=(1,2,3,4,5,6,7,8,9)))
+    # ⭐ Änderung hier
+    ax.yaxis.set_major_locator(mticker.LogLocator(base=10, subs=(1,2,5)))
     ax.yaxis.set_minor_locator(mticker.NullLocator())
     ax.yaxis.set_major_formatter(mticker.FuncFormatter(fmt_y))
 
@@ -300,9 +216,6 @@ def main():
             linewidth=0.9,
         ),
     )
-
-    for spine in ax.spines.values():
-        spine.set_color("#22252A")
 
     fig.savefig(
         OUTFILE,
