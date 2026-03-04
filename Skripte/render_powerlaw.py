@@ -1,167 +1,137 @@
 import datetime as dt
 import numpy as np
 import pandas as pd
-import matplotlib.pyplot as plt
-import matplotlib.dates as mdates
-from matplotlib.ticker import FuncFormatter
 import yfinance as yf
+import matplotlib.pyplot as plt
 
 OUTFILE = "docs/powerlaw.png"
 
 START_DATE = "2011-01-01"
 END_YEAR = 2040
+GENESIS = dt.date(2009, 1, 3)
 
 Y_MIN = 0.1
 Y_MAX = 10_000_000
 
-COLOR_PRICE = "#F7931A"
-COLOR_REG   = "#A6CF6C"
-COLOR_SUP   = "#D95B43"
-COLOR_RES   = "#8E4EC6"
+C_PRICE = "#F7930A"
+C_REG   = "#8BC34A"
+C_SUP   = "#D04B3F"
+C_RES   = "#7E3FBF"
 
-BG = "#0B0B0B"
-LINE_W = 2.2
-
-SOURCE_TEXT = "Quelle Kursdaten: Yahoo Finance (Ticker BTC-USD)"
+LW_PRICE = 2.0
+LW_LINE  = 2.2
 
 
-def fmt_usd(x, pos=None):
-    if x >= 1:
-        return f"{int(x):,}"
-    return f"{x:.1f}".rstrip("0").rstrip(".")
+def days_since_genesis(d):
+    return max(1, (d - GENESIS).days)
 
 
-def fit_powerlaw(x, y):
-    x = np.asarray(x).ravel()
-    y = np.asarray(y).ravel()
-
-    mask = (x > 0) & (y > 0)
-    x = x[mask]
-    y = y[mask]
-
-    lx = np.log10(x)
-    ly = np.log10(y)
-
-    m, b = np.polyfit(lx, ly, 1)
-    return m, b
-
-
-def eval_powerlaw(x, m, b):
-    x = np.asarray(x).ravel()
-    return 10 ** (m * np.log10(x) + b)
-
-
-def fetch_data():
+def fetch_btc():
     df = yf.download(
         "BTC-USD",
         start=START_DATE,
         interval="1d",
         auto_adjust=False,
         progress=False,
+        threads=True,
     )
 
     if df is None or df.empty:
-        raise RuntimeError("Keine Kursdaten von Yahoo erhalten.")
+        raise RuntimeError("Keine Daten von Yahoo Finance erhalten.")
 
     close = df["Close"]
 
-    # Fix für MultiIndex / DataFrame-Problem
     if isinstance(close, pd.DataFrame):
         close = close.iloc[:, 0]
 
-    close = close.dropna().astype(float)
+    close = close.dropna()
+    close = close[close > 0]
 
-    dates = pd.to_datetime(close.index).to_pydatetime()
-    prices = close.to_numpy(dtype=float).ravel()
+    return close
 
-    return dates, prices
+
+def fit_line(x, y):
+    lx = np.log10(x)
+    ly = np.log10(y)
+    b, a = np.polyfit(lx, ly, 1)
+    return a, b
+
+
+def eval_line(a, b, x):
+    return 10 ** (a + b * np.log10(x))
 
 
 def main():
-    dates_hist, price_hist = fetch_data()
+    close = fetch_btc()
 
-    start_dt = dt.datetime.fromisoformat(START_DATE)
-    x_hist = np.array([(d - start_dt).days for d in dates_hist], dtype=float)
-    x_hist[x_hist < 1] = 1
+    dates = close.index.date
+    x_hist = np.array([days_since_genesis(d) for d in dates], dtype=float)
+    y_hist = close.values.astype(float)
 
-    m_reg, b_reg = fit_powerlaw(x_hist, price_hist)
-    y_reg_hist = eval_powerlaw(x_hist, m_reg, b_reg)
+    x_start = days_since_genesis(dt.date(2011, 1, 1))
+    x_end = days_since_genesis(dt.date(END_YEAR, 12, 31))
 
-    resid = np.log10(price_hist) - np.log10(y_reg_hist)
+    mask = (x_hist >= x_start) & (x_hist <= x_end)
+    x_fit = x_hist[mask]
+    y_fit = y_hist[mask]
 
-    low_mask = resid <= np.quantile(resid, 0.20)
-    high_mask = resid >= np.quantile(resid, 0.80)
+    a_mid, b_mid = fit_line(x_fit, y_fit)
+    y_mid = eval_line(a_mid, b_mid, x_fit)
 
-    m_sup, b_sup = fit_powerlaw(x_hist[low_mask], price_hist[low_mask])
-    m_res, b_res = fit_powerlaw(x_hist[high_mask], price_hist[high_mask])
+    resid = np.log10(y_fit) - np.log10(y_mid)
 
-    end_dt = dt.datetime(END_YEAR, 12, 31)
-    all_dates = pd.date_range(start=start_dt, end=end_dt, freq="D").to_pydatetime()
-    x_all = np.array([(d - start_dt).days for d in all_dates], dtype=float)
-    x_all[x_all < 1] = 1
+    sup_mask = resid <= np.quantile(resid, 0.20)
+    res_mask = resid >= np.quantile(resid, 0.80)
 
-    y_reg = eval_powerlaw(x_all, m_reg, b_reg)
-    y_sup = eval_powerlaw(x_all, m_sup, b_sup)
-    y_res = eval_powerlaw(x_all, m_res, b_res)
+    a_sup, b_sup = fit_line(x_fit[sup_mask], y_fit[sup_mask])
+    a_res, b_res = fit_line(x_fit[res_mask], y_fit[res_mask])
+
+    x_line = np.geomspace(x_start, x_end, 700)
+
+    y_reg = eval_line(a_mid, b_mid, x_line)
+    y_sup = eval_line(a_sup, b_sup, x_line)
+    y_res = eval_line(a_res, b_res, x_line)
 
     plt.close("all")
-    fig = plt.figure(figsize=(16, 9), dpi=150, facecolor=BG)
+    fig = plt.figure(figsize=(14, 8), dpi=150)
     ax = fig.add_subplot(111)
-    ax.set_facecolor(BG)
 
-    ax.plot(all_dates, y_res, color=COLOR_RES, lw=LINE_W, label="Widerstand")
-    ax.plot(all_dates, y_reg, color=COLOR_REG, lw=LINE_W, label="Regression")
-    ax.plot(all_dates, y_sup, color=COLOR_SUP, lw=LINE_W, label="Unterstützung")
-    ax.plot(dates_hist, price_hist, color=COLOR_PRICE, lw=1.8, alpha=0.9, label="Preis (Tagesschluss)")
+    fig.patch.set_facecolor("#0b0c10")
+    ax.set_facecolor("#0b0c10")
 
+    ax.set_xscale("log")
     ax.set_yscale("log")
+
+    ax.plot(x_line, y_res, color=C_RES, linewidth=LW_LINE)
+    ax.plot(x_line, y_reg, color=C_REG, linewidth=LW_LINE)
+    ax.plot(x_line, y_sup, color=C_SUP, linewidth=LW_LINE)
+
+    ax.plot(x_hist, y_hist, color=C_PRICE, linewidth=LW_PRICE)
+
+    ax.set_xlim(x_start, x_end)
     ax.set_ylim(Y_MIN, Y_MAX)
-    ax.set_xlim(dt.datetime(2011, 1, 1), dt.datetime(END_YEAR, 12, 31))
 
-    ax.yaxis.set_major_formatter(FuncFormatter(fmt_usd))
-    ax.tick_params(axis="y", colors="#D0D0D0")
+    years = range(2011, END_YEAR + 1)
+    x_ticks = [days_since_genesis(dt.date(y, 1, 1)) for y in years]
+    ax.set_xticks(x_ticks)
+    ax.set_xticklabels([str(y) for y in years], rotation=30, ha="right")
 
-    ax.xaxis.set_major_locator(mdates.YearLocator(1))
-    ax.xaxis.set_major_formatter(mdates.DateFormatter("%Y"))
-
-    for lbl in ax.get_xticklabels():
-        lbl.set_rotation(28)
-        lbl.set_ha("right")
-        lbl.set_fontsize(8)
-        lbl.set_color("#D0D0D0")
-
-    ax.grid(True, which="major", color="white", alpha=0.18, lw=0.8)
-    ax.grid(True, which="minor", color="white", alpha=0.06, lw=0.5)
-
-    ax.set_ylabel("USD", color="#BEBEBE")
-
-    leg = ax.legend(
-        loc="lower right",
-        frameon=True,
-        facecolor="#0F0F0F",
-        edgecolor="#2A2A2A",
-    )
-    for t in leg.get_texts():
-        t.set_color("#EAEAEA")
+    y_ticks = [0.1, 1, 10, 100, 1000, 10000, 100000, 1000000, 10000000]
+    ax.set_yticks(y_ticks)
+    ax.set_yticklabels([f"{int(y):,}" if y >= 1 else "0.1" for y in y_ticks])
 
     ax.text(
-        0.14, 0.90,
-        SOURCE_TEXT,
+        0.06, 0.92,
+        "Quelle Kursdaten: Yahoo Finance (Ticker BTC-USD)",
         transform=ax.transAxes,
-        color="#FFFFFF",
-        fontsize=10,
-        va="top",
-        ha="left",
-        bbox=dict(
-            boxstyle="square,pad=0.35",
-            facecolor="none",
-            edgecolor="#FFFFFF",
-            linewidth=1.0
-        )
+        color="white",
+        fontsize=9,
+        bbox=dict(facecolor="none", edgecolor="white", linewidth=1.0)
     )
 
-    plt.tight_layout(pad=1.2)
-    fig.savefig(OUTFILE, bbox_inches="tight", facecolor=fig.get_facecolor())
+    plt.tight_layout()
+    fig.savefig(OUTFILE, bbox_inches="tight")
+    plt.close(fig)
 
 
 if __name__ == "__main__":
