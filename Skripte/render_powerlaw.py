@@ -236,9 +236,45 @@ def main():
     ax.set_xlim(x_min, x_max)
     ax.set_ylim(y_min, Y_MAX)
 
-    ax.yaxis.set_major_locator(mticker.LogLocator(base=10))
-    ax.yaxis.set_minor_locator(mticker.LogLocator(base=10, subs=np.arange(2, 10) * 0.1))
-    ax.yaxis.set_major_formatter(mticker.FuncFormatter(fmt_y))
+    # feste Y-Ticks wie gewünscht
+y_ticks = [
+    0.1,
+    1,
+    5,
+    10,
+    50,
+    100,
+    500,
+    1000,
+    5000,
+    10000,
+    50000,
+    100000,
+    500000,
+    1000000,
+    5000000,
+    10000000
+]
+
+ax.set_yticks(y_ticks)
+ax.set_yticklabels([
+    "0",
+    "1",
+    "5",
+    "10",
+    "50",
+    "100",
+    "500",
+    "1000",
+    "5000",
+    "10000",
+    "50000",
+    "100000",
+    "500000",
+    "1000000",
+    "5000000",
+    "10000000"
+])
     ax.set_ylabel("USD")
 
     # Jahres-Ticks 2011–2040 (schräg + klein, damit hinten nicht überlappt)
