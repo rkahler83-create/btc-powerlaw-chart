@@ -234,7 +234,27 @@ def main():
     ax.plot(x_line, y_res,  color=COL_RES, linewidth=LW_LINE, label="Widerstand")
 
     ax.set_xlim(x_min, x_max)
-    ax.set_ylim(y_min, Y_MAX)
+ax.set_ylim(y_min, Y_MAX)
+
+# 5er Zwischenlinien
+five_lines = [
+    5,
+    50,
+    500,
+    5_000,
+    50_000,
+    500_000,
+    5_000_000
+]
+
+for y in five_lines:
+    ax.axhline(
+        y=y,
+        color="white",
+        linewidth=0.6,
+        alpha=0.12,
+        zorder=0
+    )
 
     ax.yaxis.set_major_locator(mticker.LogLocator(base=10))
     ax.yaxis.set_minor_locator(mticker.LogLocator(base=10, subs=np.arange(2, 10) * 0.1))
