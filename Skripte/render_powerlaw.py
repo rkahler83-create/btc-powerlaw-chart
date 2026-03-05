@@ -234,6 +234,9 @@ def main():
     ax.plot(x_line, y_res,  color=COL_RES, linewidth=LW_LINE, label="Widerstand")
 
     ax.set_xlim(x_min, x_max)
+    ax.set_ylim(y_min, Y_MAX) 
+
+    ax.set_xlim(x_min, x_max)
 ax.set_ylim(y_min, Y_MAX)
 
 # 5er Zwischenlinien
